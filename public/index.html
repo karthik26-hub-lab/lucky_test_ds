@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CA Evaluation Tester</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <strong>CA Evaluation Tester</strong>
+    <span class="muted">Descriptive answer accuracy check</span>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="evaluate" role="tab">Evaluate</button>
+    <button class="tab" data-tab="history" role="tab">History &amp; accuracy</button>
+    <button class="tab" data-tab="settings" role="tab">Settings</button>
+  </nav>
+  <span id="key-status" class="pill">No API key</span>
+</header>
+
+<main>
+  <!-- ============ EVALUATE ============ -->
+  <section id="tab-evaluate" class="tab-panel">
+    <ol class="stepper">
+      <li data-step="1" class="current"><span>1</span> Evaluation materials</li>
+      <li data-step="2"><span>2</span> Student scripts &amp; results</li>
+    </ol>
+
+    <!-- STEP 1 -->
+    <div id="step-1">
+      <div class="card">
+        <div class="card-head">
+          <h2>Upload the evaluation materials</h2>
+          <select id="saved-questions"><option value="">Or use a saved question…</option></select>
+        </div>
+        <p class="muted">Upload the question, stepwise marking scheme, ICAI keywords and expected layout. You can upload several files at once: Excel (.xlsx), CSV, text, Word (.docx), PDF or images.</p>
+        <label class="drop" id="materials-drop">
+          <input id="materials-files" type="file" multiple accept=".xlsx,.csv,.txt,.md,.docx,.pdf,image/*">
+          <span id="materials-text">Drop the materials here, or click to choose</span>
+        </label>
+        <div class="row gap between-wrap">
+          <label class="check"><input id="use-ai-import" type="checkbox" checked> Use AI to read files that are not in the template format (PDFs, scans, free text)</label>
+          <span class="muted small">Templates: <a href="/api/templates/evaluation-template.xlsx">Excel</a> · <a href="/api/templates/evaluation-template.txt">Text</a></span>
+        </div>
+        <ul id="import-notes" class="notes" hidden></ul>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>Check and edit</h2>
+          <span class="muted small">Everything below is editable. Imported values appear here.</span>
+        </div>
+
+        <div class="grid-3">
+          <label>Question code<input id="q-code" placeholder="e.g. Law Q1(a)"></label>
+          <label>Max marks<input id="q-max" type="number" min="0.5" step="0.5"></label>
+          <label>Mark in steps of
+            <select id="q-granularity">
+              <option value="0.25">0.25</option>
+              <option value="0.5" selected>0.5</option>
+              <option value="1">1</option>
+            </select>
+          </label>
+        </div>
+
+        <label>Question text<textarea id="q-text" rows="3" placeholder="The question exactly as given to the student"></textarea></label>
+
+        <div class="sub-head">
+          <h3>Stepwise marks</h3>
+          <span id="step-total" class="muted"></span>
+        </div>
+        <div class="table-wrap">
+          <table class="steps-table">
+            <thead><tr><th>#</th><th>Step</th><th class="num">Marks</th><th>What earns the marks</th><th>Step keywords</th><th></th></tr></thead>
+            <tbody id="steps-body"></tbody>
+          </table>
+        </div>
+        <button id="btn-add-step" class="ghost small" type="button">+ Add step</button>
+
+        <div class="grid-2">
+          <label>ICAI keywords <span class="muted">(one per line; alternatives with |)</span>
+            <textarea id="q-keywords" rows="6" placeholder="Section 185&#10;loan | advance"></textarea>
+          </label>
+          <label>Expected layout / structure
+            <textarea id="q-layout" rows="6" placeholder="e.g. Provision → Facts → Analysis → Conclusion"></textarea>
+          </label>
+        </div>
+        <label>Marking scheme / ICAI suggested answer
+          <textarea id="q-scheme" rows="7"></textarea>
+        </label>
+        <label>Extra instructions for this question <span class="muted">(optional)</span>
+          <textarea id="q-instructions" rows="2"></textarea>
+        </label>
+
+        <div class="row gap between-wrap">
+          <div class="row gap">
+            <button id="btn-save-question" class="secondary" type="button">Save question</button>
+            <button id="btn-new-question" class="ghost" type="button">Clear</button>
+            <button id="btn-delete-question" class="ghost danger" type="button" hidden>Delete saved</button>
+          </div>
+          <button id="btn-next" class="primary" type="button">Next: student scripts →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- STEP 2 -->
+    <div id="step-2" hidden>
+      <div class="columns">
+        <div class="col">
+          <div class="card">
+            <div class="card-head">
+              <h2>Question</h2>
+              <button id="btn-back" class="ghost small-btn" type="button">← Edit materials</button>
+            </div>
+            <div id="setup-summary"></div>
+          </div>
+
+          <div class="card">
+            <h2>Upload student scripts</h2>
+            <div class="segmented">
+              <label><input type="radio" name="script-mode" value="single" checked> One script <span class="muted">(all files are pages of one answer)</span></label>
+              <label><input type="radio" name="script-mode" value="batch"> Several scripts <span class="muted">(each file is a different student)</span></label>
+            </div>
+            <label class="drop" id="script-drop">
+              <input id="script-files" type="file" accept="application/pdf,image/*" multiple>
+              <span id="script-text">Drop the answer script here, or click to choose<br><span class="muted">PDF or photos</span></span>
+            </label>
+
+            <div id="single-fields" class="grid-2">
+              <label>Script name / roll no.<input id="script-name" placeholder="e.g. Roll 410892"></label>
+              <label>Faculty marks <span class="muted">(optional)</span><input id="faculty-total" type="number" step="0.25" min="0"></label>
+            </div>
+
+            <div id="queue-wrap" class="table-wrap" hidden>
+              <table class="queue-table">
+                <thead><tr><th>File</th><th>Script name</th><th class="num">Faculty</th><th>Status</th></tr></thead>
+                <tbody id="queue-body"></tbody>
+              </table>
+            </div>
+
+            <div class="row gap">
+              <button id="btn-evaluate" class="primary grow" type="button">Evaluate</button>
+              <button id="btn-stop" class="ghost danger" type="button" hidden>Stop after current</button>
+            </div>
+            <p id="pace-note" class="muted small"></p>
+          </div>
+        </div>
+
+        <div class="col">
+          <div class="card sticky" id="result-card">
+            <div id="status" class="status" hidden></div>
+            <div id="result-empty" class="empty">
+              <h2>Result</h2>
+              <p class="muted">Upload a script and click <b>Evaluate</b>.</p>
+            </div>
+            <div id="result" hidden></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ HISTORY ============ -->
+  <section id="tab-history" class="tab-panel" hidden>
+    <div class="card">
+      <div class="card-head">
+        <h2>Accuracy against faculty marks</h2>
+        <a class="button secondary" href="/api/runs.csv">Export CSV</a>
+      </div>
+      <div id="accuracy-summary" class="stats"></div>
+    </div>
+    <div class="card">
+      <h2>All evaluations</h2>
+      <div class="table-wrap">
+        <table class="history-table">
+          <thead><tr><th>Date</th><th>Script</th><th>Question</th><th>Models (OCR / marking)</th><th class="num">AI</th><th class="num">Faculty</th><th class="num">Diff</th><th>Review</th><th></th></tr></thead>
+          <tbody id="history-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SETTINGS ============ -->
+  <section id="tab-settings" class="tab-panel" hidden>
+    <div class="settings-grid">
+      <div class="card">
+        <h2>Gemini API key</h2>
+        <p class="muted">Get a key at <b>aistudio.google.com/apikey</b>. It stays in this browser and is sent only to Google.</p>
+        <label>API key<input id="api-key" type="password" autocomplete="off" placeholder="AIza…"></label>
+        <label class="check"><input id="remember-key" type="checkbox" checked> Remember on this computer</label>
+        <div class="row gap">
+          <button id="btn-save-key" class="primary" type="button">Save key &amp; load models</button>
+          <span id="key-message" class="muted"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Models</h2>
+        <p class="muted small">Type any model name, or pick from the list loaded from your key.</p>
+        <label>OCR model <span class="muted">(reads the handwriting)</span><input id="s-ocrModel" list="model-list"></label>
+        <label>Marking model <span class="muted">(grades the transcript)</span><input id="s-gradingModel" list="model-list"></label>
+        <label>Import model <span class="muted">(organizes uploaded materials)</span><input id="s-organizeModel" list="model-list"></label>
+        <label>Fallback models <span class="muted">(comma separated; tried in order when a model hits its limit)</span><input id="s-fallbackModels" list="model-list"></label>
+        <label>Temperature <span class="muted">(0 = most consistent)</span><input id="s-temperature" type="number" min="0" max="2" step="0.1"></label>
+        <datalist id="model-list"></datalist>
+      </div>
+
+      <div class="card">
+        <h2>Free-tier protection</h2>
+        <label>Requests per minute <span class="muted">(0 = no limit; free tier is usually 5–15)</span><input id="s-requestsPerMinute" type="number" min="0" step="1"></label>
+        <div class="grid-2">
+          <label>Retries when rate-limited<input id="s-maxRetries" type="number" min="0" max="10" step="1"></label>
+          <label>Longest wait per retry (seconds)<input id="s-maxWaitSeconds" type="number" min="1" max="600" step="1"></label>
+        </div>
+        <label>Shrink photos to longest side (px) <span class="muted">(0 = off; fewer tokens, 2000 keeps handwriting readable)</span><input id="s-imageMaxSide" type="number" min="0" step="100"></label>
+        <label class="check"><input id="s-reuseTranscripts" type="checkbox"> Reuse the saved transcript when the same script is evaluated again (no OCR call)</label>
+        <label class="check"><input id="s-combineOcrAndMarking" type="checkbox"> Do OCR and marking in one request (half the requests; uses the OCR model)</label>
+      </div>
+
+      <div class="card">
+        <h2>Review rules</h2>
+        <label>Flag a step when confidence is below <span class="muted">(0 to 1)</span><input id="s-lowConfidence" type="number" min="0" max="1" step="0.05"></label>
+        <p class="muted small">Scripts are also flagged for unclear words, evidence quotes not found in the transcript, missing steps and keyword disagreements.</p>
+      </div>
+
+      <div class="card span-2">
+        <div class="card-head"><h2>Prompts</h2><span class="muted small">Edit the instructions sent to the model.</span></div>
+        <label><span class="row between"><span>OCR instructions</span><button class="link-btn" data-reset="ocrPrompt" type="button">Reset to default</button></span>
+          <textarea id="s-ocrPrompt" rows="9" class="mono"></textarea></label>
+        <label><span class="row between"><span>Marking instructions</span><button class="link-btn" data-reset="markingInstructions" type="button">Reset to default</button></span>
+          <textarea id="s-markingInstructions" rows="12" class="mono"></textarea></label>
+        <label><span class="row between"><span>Import instructions <span class="muted">(how uploaded materials are organized)</span></span><button class="link-btn" data-reset="organizePrompt" type="button">Reset to default</button></span>
+          <textarea id="s-organizePrompt" rows="8" class="mono"></textarea></label>
+        <p class="muted small">The question, steps, keywords, layout and transcript are added after these instructions automatically.</p>
+      </div>
+    </div>
+    <div class="save-bar">
+      <button id="btn-save-settings" class="primary" type="button">Save settings</button>
+      <button id="btn-reset-settings" class="ghost" type="button">Reset all to defaults</button>
+      <span id="settings-message" class="muted"></span>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="toast" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>
