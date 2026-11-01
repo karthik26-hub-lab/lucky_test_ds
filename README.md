@@ -76,15 +76,15 @@ QUESTION:
 The question, with its data tables.
 Total Marks: 5
 STEPS:
-Step 1: Start with Net Profit (½ Mark)
-Net Profit = ₹10,00,000
-Step 2: Add inadmissible expenses (1½ Marks)
+Step 1: First working (½ Mark)
+Working = ₹1,00,000
+Step 2: Second working (1½ Marks)
 ...workings, tables and figures...
 KEYWORDS:
-Income-tax: Disallowed under Section 40(a)(ii).
+Keyword: What it means or why it matters.
 MARKS DISTRIBUTION:
 (a table of steps and marks, used as a cross-check)
-FINAL ANSWER: ₹10,70,000
+FINAL ANSWER: ₹1,25,000
 ```
 
 For several questions in one file, start each with `QUESTION 1:`, `QUESTION 2:` and so on.
