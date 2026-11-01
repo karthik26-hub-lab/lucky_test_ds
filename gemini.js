@@ -125,6 +125,9 @@ export async function filesToParts(ai, files) {
 }
 
 export function parseJson(resp) {
+  if (resp.candidates?.[0]?.finishReason === 'MAX_TOKENS') {
+    throw new HttpError(502, 'The answer was too long for the model to finish. Split the document into smaller files, or pick a model with a higher output limit.');
+  }
   try {
     return JSON.parse(resp.text || '');
   } catch {

@@ -17,7 +17,9 @@ const SETTING_FIELDS = [
   'lowConfidence',
   'ocrPrompt',
   'markingInstructions',
-  'organizePrompt'
+  'numericalInstructions',
+  'documentPrompt',
+  'segmentPrompt'
 ];
 
 const state = {
@@ -27,7 +29,11 @@ const state = {
   steps: [],
   questions: [],
   currentQuestionId: null,
+  paper: [{}],
+  activeIndex: 0,
+  evalSetups: [],
   run: null,
+  runGroup: [],
   busy: false,
   stopRequested: false,
   scriptFiles: [],
@@ -249,9 +255,13 @@ function setupIsUsable(setup) {
 }
 
 function toStep2() {
-  const setup = readSetup();
-  if (!setupIsUsable(setup)) return toast('Add the question, a marking scheme or at least one step first.', true);
-  renderSetupSummary(setup);
+  commitActive();
+  const included = state.paper.filter((q) => q.include !== false);
+  if (!included.length) return toast('Tick at least one question first.', true);
+  const unusable = included.find((q) => !setupIsUsable(q));
+  if (unusable) return toast(`Add the question, a marking scheme or at least one step to ${unusable.code || 'this question'} first.`, true);
+  state.evalSetups = included;
+  renderSetupSummary(included);
   goStep(2);
 }
 
@@ -259,18 +269,39 @@ document.querySelectorAll('.stepper li').forEach((li) => li.addEventListener('cl
 $('btn-next').addEventListener('click', toStep2);
 $('btn-back').addEventListener('click', () => goStep(1));
 
-function renderSetupSummary(setup) {
-  const stepTotal = setup.steps.reduce((sum, s) => sum + (Number(s.marks) || 0), 0);
-  const keywordCount = setup.keywords.split('\n').filter((k) => k.trim()).length;
+function renderSetupSummary(setups) {
+  const isPaper = setups.length > 1;
+  $('faculty-field').hidden = isPaper;
+  $('summary-heading').textContent = isPaper ? 'Questions' : 'Question';
+  $('paper-note').hidden = !isPaper;
+  updatePaceNote();
+  renderQueue();
+  const setup = setups[0];
+  const stepTotalOf = (q) => q.steps.reduce((sum, st) => sum + (Number(st.marks) || 0), 0);
+  const keywordCount = (q) => q.keywords.split('\n').filter((k) => k.trim()).length;
+  if (isPaper) {
+    const total = setups.reduce((sum, q) => sum + (Number(q.maxMarks) || 0), 0);
+    $('setup-summary').innerHTML = `
+      <div class="table-wrap"><table>
+        <thead><tr><th>Question</th><th>Type</th><th class="num">Marks</th><th class="num">Steps</th><th class="num">Keywords</th></tr></thead>
+        <tbody>${setups
+          .map(
+            (q) => `<tr><td>${esc(q.code || '–')}</td><td>${esc(q.questionType || '–')}</td><td class="num">${fmt(q.maxMarks)}</td><td class="num">${q.steps.length || 'from scheme'}</td><td class="num">${keywordCount(q)}</td></tr>`
+          )
+          .join('')}</tbody>
+      </table></div>
+      <p class="muted small">${setups.length} questions, ${fmt(total)} marks in total.</p>`;
+    return;
+  }
   $('setup-summary').innerHTML = `
     <div class="summary-grid">
       <div><span class="muted small">Question</span><b>${esc(setup.code || '–')}</b></div>
       <div><span class="muted small">Max marks</span><b>${fmt(setup.maxMarks)}</b></div>
       <div><span class="muted small">Steps</span><b>${setup.steps.length || 'from scheme'}</b></div>
-      <div><span class="muted small">Keywords</span><b>${keywordCount}</b></div>
+      <div><span class="muted small">Keywords</span><b>${keywordCount(setup)}</b></div>
     </div>
     <div class="muted small">${esc(setup.questionText.slice(0, 220))}${setup.questionText.length > 220 ? '…' : ''}</div>
-    ${setup.steps.length && Math.abs(stepTotal - setup.maxMarks) > 0.001 ? `<div class="warnings" style="margin-top:8px">Steps add up to ${fmt(stepTotal)}, not ${fmt(setup.maxMarks)}.</div>` : ''}`;
+    ${setup.steps.length && Math.abs(stepTotalOf(setup) - setup.maxMarks) > 0.001 ? `<div class="warnings" style="margin-top:8px">Steps add up to ${fmt(stepTotalOf(setup))}, not ${fmt(setup.maxMarks)}.</div>` : ''}`;
 }
 
 // ---------- step 1: materials ----------
@@ -328,7 +359,10 @@ $('q-max').addEventListener('input', updateStepTotal);
 function readSetup() {
   return {
     id: state.currentQuestionId,
+    paperTitle: state.paper[state.activeIndex]?.paperTitle || '',
     code: $('q-code').value,
+    topic: $('q-topic').value,
+    questionType: $('q-type').value,
     questionText: $('q-text').value,
     maxMarks: Number($('q-max').value),
     granularity: Number($('q-granularity').value),
@@ -343,6 +377,8 @@ function readSetup() {
 function fillSetup(s = {}) {
   state.currentQuestionId = s.id || null;
   $('q-code').value = s.code || '';
+  $('q-topic').value = s.topic || '';
+  $('q-type').value = s.questionType || '';
   $('q-text').value = s.questionText || '';
   $('q-max').value = s.maxMarks || '';
   $('q-granularity').value = String(s.granularity || 0.5);
@@ -356,6 +392,54 @@ function fillSetup(s = {}) {
   renderSteps();
 }
 
+// The form always shows one question of the paper; this saves its edits back before switching.
+function commitActive() {
+  const include = state.paper[state.activeIndex]?.include;
+  state.paper[state.activeIndex] = { ...readSetup(), include };
+}
+
+function loadPaper(setups) {
+  state.paper = setups.length ? setups.map((q) => ({ ...q })) : [{}];
+  state.activeIndex = 0;
+  fillSetup(state.paper[0]);
+  renderPaperBar();
+}
+
+function renderPaperBar() {
+  const isPaper = state.paper.length > 1;
+  $('paper-bar').hidden = !isPaper;
+  $('btn-save-question').textContent = isPaper ? `Save all ${state.paper.length} questions` : 'Save question';
+  if (!isPaper) return;
+  const included = state.paper.filter((q) => q.include !== false);
+  const total = included.reduce((sum, q) => sum + (Number(q.maxMarks) || 0), 0);
+  $('paper-title').textContent = `${state.paper[0].paperTitle || 'Detected paper'}: ${included.length} of ${state.paper.length} questions, ${fmt(total)} marks`;
+  $('paper-chips').innerHTML = state.paper
+    .map(
+      (q, i) => `<span class="chip ${i === state.activeIndex ? 'active' : ''}">
+        <input type="checkbox" data-include="${i}" title="Include this question" ${q.include !== false ? 'checked' : ''}>
+        <button type="button" data-open-q="${i}">${esc(q.code || `Q${i + 1}`)}${q.questionType ? ` · ${esc(q.questionType)}` : ''}</button>
+      </span>`
+    )
+    .join('');
+}
+
+$('paper-chips').addEventListener('click', (e) => {
+  const open = e.target.dataset.openQ;
+  if (open === undefined) return;
+  commitActive();
+  state.activeIndex = Number(open);
+  fillSetup(state.paper[state.activeIndex]);
+  renderPaperBar();
+});
+
+$('paper-chips').addEventListener('change', (e) => {
+  const i = e.target.dataset.include;
+  if (i === undefined) return;
+  commitActive();
+  state.paper[Number(i)].include = e.target.checked;
+  renderPaperBar();
+});
+
 async function loadQuestions() {
   try {
     state.questions = await api('/api/questions');
@@ -364,31 +448,41 @@ async function loadQuestions() {
   }
   $('saved-questions').innerHTML =
     '<option value="">Or use a saved question…</option>' +
+    [...new Set(state.questions.map((q) => q.paperTitle).filter(Boolean))]
+      .map((title) => `<option value="paper:${esc(title)}">Paper: ${esc(title)} (${state.questions.filter((q) => q.paperTitle === title).length} questions)</option>`)
+      .join('') +
     state.questions.map((q) => `<option value="${esc(q.id)}">${esc(q.code || q.questionText.slice(0, 50))}</option>`).join('');
   $('saved-questions').value = state.currentQuestionId || '';
 }
 
 $('saved-questions').addEventListener('change', (e) => {
-  const q = state.questions.find((item) => item.id === e.target.value);
-  if (q) {
-    fillSetup(q);
+  const value = e.target.value;
+  const chosen = value.startsWith('paper:')
+    ? state.questions.filter((q) => q.paperTitle === value.slice(6)).reverse()
+    : state.questions.filter((q) => q.id === value);
+  if (chosen.length) {
+    loadPaper(chosen);
     $('import-notes').hidden = true;
   }
 });
 
 $('btn-new-question').addEventListener('click', () => {
-  fillSetup({});
+  loadPaper([]);
   $('import-notes').hidden = true;
-  $('materials-text').textContent = 'Drop the materials here, or click to choose';
+  $('materials-text').textContent = 'Drop the Word file here, or click to choose';
 });
 
 $('btn-save-question').addEventListener('click', async () => {
   try {
-    const saved = await api('/api/questions', { method: 'POST', json: readSetup() });
-    state.currentQuestionId = saved.id;
+    commitActive();
+    for (const [i, q] of state.paper.entries()) {
+      const saved = await api('/api/questions', { method: 'POST', json: q });
+      state.paper[i].id = saved.id;
+    }
+    state.currentQuestionId = state.paper[state.activeIndex].id;
     await loadQuestions();
     $('btn-delete-question').hidden = false;
-    toast('Question saved.');
+    toast(state.paper.length > 1 ? `${state.paper.length} questions saved.` : 'Question saved.');
   } catch (err) {
     toast(err.message, true);
   }
@@ -397,7 +491,7 @@ $('btn-save-question').addEventListener('click', async () => {
 $('btn-delete-question').addEventListener('click', async () => {
   if (!state.currentQuestionId || !confirm('Delete this saved question? Past evaluations are kept.')) return;
   await api(`/api/questions/${encodeURIComponent(state.currentQuestionId)}`, { method: 'DELETE' });
-  fillSetup({});
+  loadPaper(state.paper.filter((_, i) => i !== state.activeIndex));
   await loadQuestions();
   toast('Saved question deleted.');
 });
@@ -405,24 +499,20 @@ $('btn-delete-question').addEventListener('click', async () => {
 async function importMaterials(files) {
   if (!files.length) return;
   const useAi = $('use-ai-import').checked;
-  const needsAi = files.some((f) => !/\.(xlsx|csv|txt|md)$/i.test(f.name));
-  if (useAi && needsAi && !state.apiKey) {
-    toast('Some files need AI to read them. Add your API key in Settings first, or turn off the AI option.', true);
-    return;
-  }
-  $('materials-text').innerHTML = `<b>Reading ${files.length} file(s)…</b>`;
+  $('materials-text').innerHTML = `<b>Reading ${files.length} file(s) and detecting the questions…</b><br><span class="muted">A long paper can take a minute or two.</span>`;
   const form = new FormData();
   files.forEach((f) => form.append('files', f));
   form.append('useAi', String(useAi));
   try {
-    const { setup, notes } = await api('/api/import', { method: 'POST', body: form });
-    fillSetup({ ...setup, id: null });
+    const { setups, paperTitle, notes } = await api('/api/import', { method: 'POST', body: form });
+    const title = paperTitle || files[0].name.replace(/\.[^.]+$/, '');
+    loadPaper(setups.map((q) => ({ ...q, id: null, paperTitle: setups.length > 1 ? title : q.paperTitle })));
     $('import-notes').innerHTML = notes.map((n) => `<li>${esc(n)}</li>`).join('');
     $('import-notes').hidden = false;
-    $('materials-text').innerHTML = `<b>${files.length} file(s) imported</b><br><span class="muted">${files.map((f) => esc(f.name)).join(', ')}. Drop more to add.</span>`;
-    toast('Materials imported. Check the fields below.');
+    $('materials-text').innerHTML = `<b>${files.length} file(s) imported</b><br><span class="muted">${files.map((f) => esc(f.name)).join(', ')}. Upload again to replace these.</span>`;
+    toast(setups.length > 1 ? `Detected ${setups.length} questions. Check each one below.` : 'Materials imported. Check the fields below.');
   } catch (err) {
-    $('materials-text').textContent = 'Drop the materials here, or click to choose';
+    $('materials-text').textContent = 'Drop the Word file here, or click to choose';
     toast(err.message, true);
   }
 }
@@ -441,7 +531,8 @@ const scriptMode = () => document.querySelector('input[name="script-mode"]:check
 function updatePaceNote() {
   const s = state.settings;
   if (!s) return;
-  const calls = s.combineOcrAndMarking ? 1 : 2;
+  const questionCount = state.evalSetups.length || 1;
+  const calls = questionCount > 1 ? questionCount + 2 : s.combineOcrAndMarking ? 1 : 2;
   const perScript = s.requestsPerMinute ? Math.ceil((calls * 60) / s.requestsPerMinute) : null;
   $('pace-note').textContent = perScript
     ? `${calls} request(s) per script. At ${s.requestsPerMinute} requests/minute, each script takes at least ~${perScript}s, plus model time. Change this in Settings.`
@@ -451,13 +542,13 @@ function updatePaceNote() {
 function renderQueue() {
   $('queue-body').innerHTML = state.queue
     .map(
-      (item, i) => `<tr class="${state.run && item.runId === state.run.id ? 'active' : ''}">
+      (item, i) => `<tr class="${state.run && (item.runs || []).some((r) => r.id === state.run.id) ? 'active' : ''}">
         <td class="small">${esc(item.file.name)}</td>
         <td><input data-q="${i}" data-f="name" value="${esc(item.name)}"></td>
-        <td class="num"><input data-q="${i}" data-f="faculty" type="number" step="0.25" min="0" value="${esc(item.faculty)}"></td>
+        <td class="num">${state.evalSetups.length > 1 ? '<span class="muted small">per question</span>' : `<input data-q="${i}" data-f="faculty" type="number" step="0.25" min="0" value="${esc(item.faculty)}">`}</td>
         <td>${
           item.run
-            ? `<button class="secondary small-btn" data-view="${i}" type="button">${fmt(item.run.totalAwarded)}/${fmt(item.run.maxMarks)} · View</button>`
+            ? `<button class="secondary small-btn" data-view="${i}" type="button">${groupMarks(item.runs)} · View</button>`
             : `<span class="tag ${item.error ? 'bad' : item.status === 'Working…' ? 'warn' : ''}" title="${esc(item.error || '')}">${esc(item.error ? 'Failed' : item.status)}</span>`
         }</td>
       </tr>`
@@ -473,7 +564,7 @@ $('queue-body').addEventListener('input', (e) => {
 $('queue-body').addEventListener('click', (e) => {
   const i = e.target.dataset.view;
   if (i === undefined) return;
-  renderRun(state.queue[Number(i)].run);
+  showRuns(state.queue[Number(i)].runs);
   renderQueue();
 });
 
@@ -525,7 +616,7 @@ async function evaluateScript(files, scriptName, facultyTotal) {
   const maxSide = state.settings?.imageMaxSide || 0;
   const form = new FormData();
   for (const f of files) form.append('files', await shrinkImage(f, maxSide));
-  form.append('setup', JSON.stringify(readSetup()));
+  form.append('setups', JSON.stringify(state.evalSetups));
   form.append('scriptName', scriptName);
   form.append('facultyTotal', facultyTotal);
   return api('/api/evaluate', { method: 'POST', body: form });
@@ -543,9 +634,9 @@ $('btn-evaluate').addEventListener('click', async () => {
     setBusy(true);
     setStatus('Reading and marking the script… on the free tier this can take a minute or more.');
     try {
-      const run = await evaluateScript(state.scriptFiles, $('script-name').value, $('faculty-total').value);
-      setStatus('');
-      renderRun(run);
+      const { runs, errors } = await evaluateScript(state.scriptFiles, $('script-name').value, $('faculty-total').value);
+      setStatus(partialFailureMessage(errors), errors.length > 0);
+      showRuns(runs);
     } catch (err) {
       setStatus(err.message, true);
     } finally {
@@ -559,6 +650,7 @@ $('btn-evaluate').addEventListener('click', async () => {
   state.stopRequested = false;
   setBusy(true);
   let done = 0;
+  const failedQuestions = [];
   for (const item of pending) {
     if (state.stopRequested) break;
     item.status = 'Working…';
@@ -566,9 +658,11 @@ $('btn-evaluate').addEventListener('click', async () => {
     renderQueue();
     setStatus(`Script ${done + 1} of ${pending.length}: ${item.name}…`);
     try {
-      item.run = await evaluateScript([item.file], item.name, item.faculty);
-      item.runId = item.run.id;
-      renderRun(item.run);
+      const { runs, errors } = await evaluateScript([item.file], item.name, item.faculty);
+      item.runs = runs;
+      item.run = runs[0];
+      if (errors.length) failedQuestions.push(`${item.name}: ${partialFailureMessage(errors)}`);
+      showRuns(runs);
     } catch (err) {
       item.error = err.message;
     }
@@ -579,8 +673,8 @@ $('btn-evaluate').addEventListener('click', async () => {
   setStatus(
     state.stopRequested
       ? `Stopped after ${done} script(s).`
-      : `Finished ${done} script(s)${failed ? `, ${failed} failed (hover “Failed” to see why). Click Evaluate to retry them.` : '.'}`,
-    failed > 0
+      : `Finished ${done} script(s)${failed ? `, ${failed} failed (hover “Failed” to see why). Click Evaluate to retry them.` : '.'}${failedQuestions.length ? ` ${failedQuestions.join(' ')}` : ''}`,
+    failed > 0 || failedQuestions.length > 0
   );
   setBusy(false);
 });
@@ -591,6 +685,21 @@ $('btn-stop').addEventListener('click', () => {
 });
 
 // ---------- result ----------
+
+function groupMarks(runs) {
+  const sum = (key) => runs.reduce((total, r) => total + (Number(r[key]) || 0), 0);
+  return `${fmt(sum('totalAwarded'))}/${fmt(sum('maxMarks'))}`;
+}
+
+function partialFailureMessage(errors) {
+  if (!errors.length) return '';
+  return `Not marked: ${errors.map((e) => e.code).join(', ')}. ${errors[0].error} The transcript is saved, so clicking Evaluate again will not repeat the OCR.`;
+}
+
+function showRuns(runs) {
+  state.runGroup = runs;
+  renderRun(runs[0]);
+}
 
 function stepFacultyValue(run, i) {
   const v = run.facultySteps?.[i];
@@ -605,17 +714,31 @@ function renderRun(run) {
 
   const diff = run.facultyTotal === null || run.facultyTotal === undefined ? null : run.totalAwarded - run.facultyTotal;
   const usage = run.usage || {};
-  const usageLine = ['ocr', 'grading']
+  const usageLabels = { ocr: 'OCR', split: 'Splitting by question', grading: run.mode === 'combined' ? 'OCR + marking' : 'Marking' };
+  const usageLine = ['ocr', 'split', 'grading']
     .filter((k) => usage[k])
     .map(
       (k) =>
-        `${k === 'ocr' ? 'OCR' : run.mode === 'combined' ? 'OCR + marking' : 'Marking'}: ${esc(usage[k].model)} · ${usage[k].inputTokens.toLocaleString()} in / ${usage[k].outputTokens.toLocaleString()} out` +
+        `${usageLabels[k]}: ${esc(usage[k].model)} · ${usage[k].inputTokens.toLocaleString()} in / ${usage[k].outputTokens.toLocaleString()} out` +
         (usage[k].thinkingTokens ? ` / ${usage[k].thinkingTokens.toLocaleString()} thinking` : '') +
         ' tokens'
     )
     .join('<br>');
 
+  const group = state.runGroup.length > 1 && state.runGroup.some((r) => r.id === run.id) ? state.runGroup : null;
   el.innerHTML = `
+    ${
+      group
+        ? `<div class="paper-results">
+            <div><b>Paper total: ${groupMarks(group)}</b> <span class="muted small">Click a question to see its marks and enter faculty marks.</span></div>
+            <div class="chips">${group
+              .map(
+                (r) => `<button type="button" class="chip-btn ${r.id === run.id ? 'active' : ''}" data-group-run="${esc(r.id)}">${esc(r.setup.code || 'Question')} · ${fmt(r.totalAwarded)}/${fmt(r.maxMarks)}${r.flags.length ? ' ⚑' : ''}</button>`
+              )
+              .join('')}</div>
+          </div>`
+        : ''
+    }
     <div class="card-head">
       <h2>${esc(run.scriptName)} <span class="muted">· ${esc(run.setup.code || 'Question')}</span></h2>
       <span class="muted small">${new Date(run.createdAt).toLocaleString()}</span>
@@ -643,7 +766,7 @@ function renderRun(run) {
             ${run.steps
               .map(
                 (s, i) => `<tr>
-                  <td><b>${s.stepNo}. ${esc(s.title)}</b>
+                  <td><b>${s.stepNo}. ${esc(s.title)}</b>${s.ownFigureApplied ? ' <span class="tag good">Own figure</span>' : ''}
                     <div>${esc(s.reasoning)}</div>
                     ${
                       s.evidenceQuote
@@ -702,7 +825,7 @@ function renderRun(run) {
     </div>
 
     <div class="section">
-      <h3>Transcript <span class="muted small">(${esc(run.transcriptSource || 'OCR')})</span></h3>
+      <h3>${run.fullTranscript ? 'Transcript of this answer' : 'Transcript'} <span class="muted small">(${esc(run.transcriptSource || 'OCR')})</span></h3>
       <p class="muted small">Correct any reading mistakes, then mark again. This separates OCR errors from marking errors. Each re-mark is saved as a new run.</p>
       <textarea id="r-transcript" class="transcript" rows="14">${esc(run.transcript)}</textarea>
       <div class="row gap" style="margin-top:8px">
@@ -710,10 +833,18 @@ function renderRun(run) {
       </div>
     </div>
 
+    ${run.fullTranscript ? `<details class="section"><summary>Full script transcript</summary><pre class="full-transcript">${esc(run.fullTranscript)}</pre></details>` : ''}
+
     <div class="section usage">${usageLine}</div>
     ${run.callNotes?.length ? `<div class="section call-notes">Rate limits during this run: ${run.callNotes.map(esc).join('; ')}</div>` : ''}
   `;
 
+  el.querySelectorAll('[data-group-run]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      renderRun(state.runGroup.find((r) => r.id === btn.dataset.groupRun));
+      renderQueue();
+    })
+  );
   $('r-faculty-total').addEventListener('change', (e) => saveFaculty({ facultyTotal: e.target.value }));
   el.querySelectorAll('.faculty-step').forEach((input) =>
     input.addEventListener('change', () => {
@@ -734,8 +865,7 @@ async function saveFaculty(patch) {
   try {
     const updated = await api(`/api/runs/${encodeURIComponent(state.run.id)}`, { method: 'PATCH', json: patch });
     state.run = updated;
-    const queued = state.queue.find((item) => item.runId === updated.id);
-    if (queued) queued.run = updated;
+    state.runGroup = state.runGroup.map((r) => (r.id === updated.id ? updated : r));
     const diff = updated.facultyTotal === null ? null : updated.totalAwarded - updated.facultyTotal;
     $('r-diff').textContent = signed(diff);
     $('r-diff').className = `value ${diffClass(diff)}`;
@@ -754,10 +884,15 @@ async function regrade() {
   try {
     const run = await api('/api/grade', {
       method: 'POST',
-      json: { setup: state.run.setup, transcript, scriptName: state.run.scriptName, facultyTotal: state.run.facultyTotal ?? '' }
+      json: { setup: state.run.setup, transcript, fullTranscript: state.run.fullTranscript, scriptName: state.run.scriptName, facultyTotal: state.run.facultyTotal ?? '' }
     });
     setStatus('');
+    state.runGroup = state.runGroup.map((r) => (r.id === state.run.id ? run : r));
+    state.queue.forEach((item) => {
+      if (item.runs) item.runs = item.runs.map((r) => (r.id === state.run.id ? run : r));
+    });
     renderRun(run);
+    renderQueue();
     toast('Marked again and saved as a new run.');
   } catch (err) {
     setStatus(err.message, true);
@@ -832,9 +967,10 @@ async function loadHistory() {
     const deleteId = e.target.dataset.delete;
     if (openId) {
       const run = runs.find((r) => r.id === openId);
-      fillSetup(run.setup);
-      renderSetupSummary(readSetup());
-      renderRun(run);
+      loadPaper([run.setup]);
+      state.evalSetups = [run.setup];
+      renderSetupSummary(state.evalSetups);
+      showRuns([run]);
       showTab('evaluate');
       goStep(2);
     } else if (deleteId && confirm('Delete this evaluation from the history?')) {
@@ -849,6 +985,6 @@ async function loadHistory() {
 state.apiKey = storageGet('apiKey');
 $('api-key').value = state.apiKey;
 refreshKeyStatus();
-fillSetup({});
+loadPaper([]);
 loadQuestions();
 loadSettings().then(loadModels).catch((err) => toast(err.message, true));

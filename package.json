@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js --open",
     "dev": "node server.js",
-    "test": "node test/lib.test.js && node test/importer.test.js"
+    "test": "node test/lib.test.js && node test/importer.test.js && node test/word.test.js && node test/e2e.test.js"
   },
   "engines": {
     "node": ">=20.12"
@@ -16,6 +16,7 @@
     "@google/genai": "^2.30.0",
     "exceljs": "^4.4.0",
     "express": "^5.1.0",
+    "jszip": "^3.10.2",
     "mammoth": "^1.13.0",
     "multer": "^2.0.2"
   }

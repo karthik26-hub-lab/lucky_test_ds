@@ -9,12 +9,15 @@ import {
   DEFAULT_SETTINGS,
   GRADE_SCHEMA,
   COMBINED_SCHEMA,
-  SETUP_SCHEMA,
+  DOCUMENT_SCHEMA,
+  SEGMENT_SCHEMA,
   sanitizeSettings,
   sanitizeSetup,
   modelChain,
   buildGradingPrompt,
   buildCombinedPrompt,
+  buildSegmentPrompt,
+  sliceAnswers,
   finalizeResult,
   findUnclear,
   csvCell
@@ -30,7 +33,7 @@ try {
 }
 
 const PORT = Number(process.env.PORT) || 5050;
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const RUNS_FILE = path.join(DATA_DIR, 'runs.json');
 const QUESTIONS_FILE = path.join(DATA_DIR, 'questions.json');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
@@ -98,20 +101,21 @@ async function runGrading(ai, setup, transcript, settings) {
   return { raw: parseJson(resp), usage: usageOf(resp, model), notes };
 }
 
-function saveRun({ setup, transcript, raw, settings, scriptName, facultyTotal, usage, notes, mode, transcriptSource }) {
+function saveRun({ setup, transcript, raw, settings, scriptName, facultyTotal, usage, notes, mode, transcriptSource, fullTranscript, resultOptions }) {
   const run = {
     id: `run-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`,
     createdAt: new Date().toISOString(),
     scriptName: String(scriptName || '').trim() || 'Untitled script',
     setup,
     transcript,
+    fullTranscript: fullTranscript || null,
     mode,
     transcriptSource,
     usage,
     callNotes: notes,
     facultyTotal: toMark(facultyTotal),
     facultySteps: [],
-    ...finalizeResult(setup, transcript, raw, settings)
+    ...finalizeResult(setup, transcript, raw, settings, resultOptions)
   };
   const runs = readJson(RUNS_FILE);
   runs.unshift(run);
@@ -181,13 +185,13 @@ app.post(
           ai,
           modelChain(settings.organizeModel, settings.fallbackModels),
           {
-            contents: [{ role: 'user', parts: [...parts, { text: settings.organizePrompt + text }] }],
-            config: { temperature: settings.temperature, responseMimeType: 'application/json', responseSchema: SETUP_SCHEMA }
+            contents: [{ role: 'user', parts: [...parts, { text: settings.documentPrompt + text }] }],
+            config: { temperature: settings.temperature, responseMimeType: 'application/json', responseSchema: DOCUMENT_SCHEMA }
           },
           settings
         );
         if (notes.length) console.log('Import:', notes.join('; '));
-        return { setup: parseJson(resp), usage: usageOf(resp, model) };
+        return { document: parseJson(resp), usage: usageOf(resp, model) };
       }
     });
     res.json(result);
@@ -203,6 +207,44 @@ function transcriptCacheKey(files, settings) {
   return hash.digest('hex');
 }
 
+// Marks one script against several questions: the transcript is split by question, then each
+// answer is marked on its own. One failed question does not lose the ones already marked.
+async function evaluatePaper(ai, setups, transcript, settings, { scriptName, ocrUsage, notes, transcriptSource }) {
+  const call = await generate(
+    ai,
+    modelChain(settings.gradingModel, settings.fallbackModels),
+    {
+      contents: buildSegmentPrompt(setups, transcript, settings),
+      config: { temperature: settings.temperature, responseMimeType: 'application/json', responseSchema: SEGMENT_SCHEMA }
+    },
+    settings
+  );
+  notes.push(...call.notes);
+  const { answers, unassignedLines } = sliceAnswers(transcript, setups, parseJson(call.resp));
+  const paperFlags = unassignedLines ? [`${unassignedLines} line(s) of the script were not matched to any question. Check the full transcript.`] : [];
+  const usageBase = { ocr: ocrUsage, split: usageOf(call.resp, call.model) };
+
+  const runs = [];
+  const errors = [];
+  for (const [i, setup] of setups.entries()) {
+    const answer = answers[i];
+    const common = { setup, transcript: answer.text, settings, scriptName, fullTranscript: transcript, mode: 'paper', transcriptSource };
+    if (!answer.attempted) {
+      // No answer means nothing to mark, so no request is spent on it
+      runs.push(saveRun({ ...common, raw: {}, usage: usageBase, notes: [], resultOptions: { notAttempted: true, flags: paperFlags } }));
+      continue;
+    }
+    try {
+      const graded = await runGrading(ai, setup, answer.text, settings);
+      runs.push(saveRun({ ...common, raw: graded.raw, usage: { ...usageBase, grading: graded.usage }, notes: [...notes, ...graded.notes], resultOptions: { flags: paperFlags } }));
+    } catch (err) {
+      errors.push({ code: setup.code, error: friendlyError(err) });
+    }
+  }
+  if (!runs.length && errors.length) throw new HttpError(502, errors[0].error);
+  return { runs, errors };
+}
+
 app.post(
   '/api/evaluate',
   upload.array('files'),
@@ -210,8 +252,16 @@ app.post(
     const files = req.files || [];
     if (!files.length) throw new HttpError(400, 'Attach the answer script (PDF or images).');
     const settings = loadSettings();
-    const setup = parseSetupField(req.body.setup);
-    requireUsableSetup(setup);
+    let setups;
+    try {
+      setups = JSON.parse(req.body.setups).map((q) => sanitizeSetup(q));
+    } catch {
+      throw new HttpError(400, 'The question setup could not be read.');
+    }
+    if (!setups.length) throw new HttpError(400, 'Choose at least one question first (Step 1).');
+    setups.forEach(requireUsableSetup);
+    const isPaper = setups.length > 1;
+    const setup = setups[0];
     const ai = clientFor(req);
 
     const cache = readJson(OCR_CACHE_FILE, {});
@@ -227,7 +277,7 @@ app.post(
 
     if (cached) {
       transcript = cached.transcript;
-    } else if (settings.combineOcrAndMarking) {
+    } else if (settings.combineOcrAndMarking && !isPaper) {
       mode = 'combined';
       const parts = await filesToParts(ai, files);
       const call = await generate(
@@ -261,6 +311,11 @@ app.post(
       cache[cacheKey] = { transcript, createdAt: new Date().toISOString() };
       writeJson(OCR_CACHE_FILE, cache);
     }
+    const transcriptSource = cached ? 'saved transcript (no OCR call)' : mode === 'combined' ? 'OCR + marking in one call' : 'OCR';
+
+    if (isPaper) {
+      return res.json(await evaluatePaper(ai, setups, transcript, settings, { scriptName: req.body.scriptName, ocrUsage, notes, transcriptSource }));
+    }
 
     if (!raw) {
       const graded = await runGrading(ai, setup, transcript, settings);
@@ -269,20 +324,23 @@ app.post(
       notes.push(...graded.notes);
     }
 
-    res.json(
-      saveRun({
-        setup,
-        transcript,
-        raw,
-        settings,
-        scriptName: req.body.scriptName,
-        facultyTotal: req.body.facultyTotal,
-        usage: { ocr: ocrUsage, grading: gradingUsage },
-        notes,
-        mode,
-        transcriptSource: cached ? 'saved transcript (no OCR call)' : mode === 'combined' ? 'OCR + marking in one call' : 'OCR'
-      })
-    );
+    res.json({
+      runs: [
+        saveRun({
+          setup,
+          transcript,
+          raw,
+          settings,
+          scriptName: req.body.scriptName,
+          facultyTotal: req.body.facultyTotal,
+          usage: { ocr: ocrUsage, grading: gradingUsage },
+          notes,
+          mode,
+          transcriptSource
+        })
+      ],
+      errors: []
+    });
   })
 );
 
@@ -290,7 +348,7 @@ app.post(
 app.post(
   '/api/grade',
   route(async (req, res) => {
-    const { setup: rawSetup, transcript, scriptName, facultyTotal } = req.body || {};
+    const { setup: rawSetup, transcript, fullTranscript, scriptName, facultyTotal } = req.body || {};
     if (!String(transcript || '').trim()) throw new HttpError(400, 'There is no transcript to mark.');
     const settings = loadSettings();
     const setup = parseSetupField(rawSetup);
@@ -300,6 +358,7 @@ app.post(
       saveRun({
         setup,
         transcript,
+        fullTranscript,
         raw,
         settings,
         scriptName,

@@ -23,12 +23,12 @@ assert.equal(parseTextTemplate('Just some free text about Section 185.'), null, 
 // --- Excel template round trip ---
 const xlsx = await buildExcelTemplate();
 const fromExcel = await importMaterials([file('template.xlsx', xlsx)], noAi);
-assert.equal(fromExcel.setup.code, EXAMPLE_SETUP.code);
-assert.equal(fromExcel.setup.questionText, EXAMPLE_SETUP.questionText);
-assert.equal(fromExcel.setup.steps.length, 4);
-assert.equal(fromExcel.setup.steps[0].keywords, 'Section 185, loan to director');
-assert.equal(fromExcel.setup.keywords.split('\n').length, EXAMPLE_SETUP.keywords.length);
-assert.equal(fromExcel.setup.granularity, 0.5);
+assert.equal(fromExcel.setups[0].code, EXAMPLE_SETUP.code);
+assert.equal(fromExcel.setups[0].questionText, EXAMPLE_SETUP.questionText);
+assert.equal(fromExcel.setups[0].steps.length, 4);
+assert.equal(fromExcel.setups[0].steps[0].keywords, 'Section 185, loan to director');
+assert.equal(fromExcel.setups[0].keywords.split('\n').length, EXAMPLE_SETUP.keywords.length);
+assert.equal(fromExcel.setups[0].granularity, 0.5);
 assert.match(fromExcel.notes[0], /read 3 table/);
 
 // --- CSV files, with a title row above the header ---
@@ -40,23 +40,23 @@ const csv = await importMaterials(
   ],
   noAi
 );
-assert.equal(csv.setup.steps.length, 2);
-assert.equal(csv.setup.maxMarks, 4, 'max marks falls back to the step total');
-assert.equal(csv.setup.keywords, 'Section 185\nloan | advance');
+assert.equal(csv.setups[0].steps.length, 2);
+assert.equal(csv.setups[0].maxMarks, 4, 'max marks falls back to the step total');
+assert.equal(csv.setups[0].keywords, 'Section 185\nloan | advance');
 
 // --- free text without AI goes into the scheme box; with AI it is organized ---
 const plain = await importMaterials([file('notes.txt', 'Suggested answer: the loan is void.')], noAi);
-assert.match(plain.setup.scheme, /the loan is void/);
+assert.match(plain.setups[0].scheme, /the loan is void/);
 const organized = await importMaterials([file('notes.txt', 'Suggested answer: the loan is void.'), file('kw.csv', 'Keyword\nvoid\n')], {
   useAi: true,
   organize: async (texts, binaries) => {
     assert.equal(texts.length, 1);
     assert.equal(binaries.length, 0);
-    return { setup: { code: 'AI-Q', questionText: 'Q?', maxMarks: 5, steps: [], keywords: ['void', 'Section 185'], layout: '', scheme: 'void loan', instructions: '' } };
+    return { document: { questions: [{ code: 'AI-Q', questionText: 'Q?', maxMarks: 5, steps: [], keywords: ['void', 'Section 185'], layout: '', scheme: 'void loan', instructions: '' }] } };
   }
 });
-assert.equal(organized.setup.code, 'AI-Q');
-assert.equal(organized.setup.keywords, 'void\nSection 185', 'keywords are merged without duplicates');
+assert.equal(organized.setups[0].code, 'AI-Q');
+assert.equal(organized.setups[0].keywords, 'void\nSection 185', 'keywords are merged without duplicates');
 const unsupported = await importMaterials([file('old.xls', 'x')], noAi);
 assert.match(unsupported.notes[0], /save as \.xlsx/);
 

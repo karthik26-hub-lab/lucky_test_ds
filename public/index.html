@@ -10,7 +10,7 @@
 <header class="topbar">
   <div class="brand">
     <strong>CA Evaluation Tester</strong>
-    <span class="muted">Descriptive answer accuracy check</span>
+    <span class="muted">Theory and numerical answer accuracy check</span>
   </div>
   <nav class="tabs" role="tablist">
     <button class="tab active" data-tab="evaluate" role="tab">Evaluate</button>
@@ -35,13 +35,13 @@
           <h2>Upload the evaluation materials</h2>
           <select id="saved-questions"><option value="">Or use a saved question…</option></select>
         </div>
-        <p class="muted">Upload the question, stepwise marking scheme, ICAI keywords and expected layout. You can upload several files at once: Excel (.xlsx), CSV, text, Word (.docx), PDF or images.</p>
+        <p class="muted"><b>Easiest:</b> put everything in one Word file: topics, questions, marks, steps, ICAI keywords, marking schemes, tables and workings, in any format. The AI detects every question and sorts it out for you to check. You can also upload separate files: Excel (.xlsx), CSV, text, PDF or images.</p>
         <label class="drop" id="materials-drop">
           <input id="materials-files" type="file" multiple accept=".xlsx,.csv,.txt,.md,.docx,.pdf,image/*">
-          <span id="materials-text">Drop the materials here, or click to choose</span>
+          <span id="materials-text">Drop the Word file here, or click to choose</span>
         </label>
         <div class="row gap between-wrap">
-          <label class="check"><input id="use-ai-import" type="checkbox" checked> Use AI to read files that are not in the template format (PDFs, scans, free text)</label>
+          <label class="check"><input id="use-ai-import" type="checkbox" checked> Use AI to detect questions from Word files, PDFs, scans and free text</label>
           <span class="muted small">Templates: <a href="/api/templates/evaluation-template.xlsx">Excel</a> · <a href="/api/templates/evaluation-template.txt">Text</a></span>
         </div>
         <ul id="import-notes" class="notes" hidden></ul>
@@ -51,6 +51,24 @@
         <div class="card-head">
           <h2>Check and edit</h2>
           <span class="muted small">Everything below is editable. Imported values appear here.</span>
+        </div>
+
+        <div id="paper-bar" class="paper-bar" hidden>
+          <div id="paper-title" class="paper-title"></div>
+          <div id="paper-chips" class="chips"></div>
+          <p class="muted small">Click a question to check it below. Untick any question you don't want to evaluate.</p>
+        </div>
+
+        <div class="grid-2">
+          <label>Topic <span class="muted">(optional)</span><input id="q-topic" placeholder="e.g. Depreciation"></label>
+          <label>Question type
+            <select id="q-type">
+              <option value="">Not set</option>
+              <option value="theory">Theory</option>
+              <option value="numerical">Numerical</option>
+              <option value="mixed">Mixed</option>
+            </select>
+          </label>
         </div>
 
         <div class="grid-3">
@@ -111,7 +129,7 @@
         <div class="col">
           <div class="card">
             <div class="card-head">
-              <h2>Question</h2>
+              <h2 id="summary-heading">Question</h2>
               <button id="btn-back" class="ghost small-btn" type="button">← Edit materials</button>
             </div>
             <div id="setup-summary"></div>
@@ -130,8 +148,9 @@
 
             <div id="single-fields" class="grid-2">
               <label>Script name / roll no.<input id="script-name" placeholder="e.g. Roll 410892"></label>
-              <label>Faculty marks <span class="muted">(optional)</span><input id="faculty-total" type="number" step="0.25" min="0"></label>
+              <label id="faculty-field">Faculty marks <span class="muted">(optional)</span><input id="faculty-total" type="number" step="0.25" min="0"></label>
             </div>
+            <p id="paper-note" class="muted small" hidden>The script is split by question automatically. Enter the faculty's marks for each question in the results.</p>
 
             <div id="queue-wrap" class="table-wrap" hidden>
               <table class="queue-table">
@@ -231,8 +250,12 @@
           <textarea id="s-ocrPrompt" rows="9" class="mono"></textarea></label>
         <label><span class="row between"><span>Marking instructions</span><button class="link-btn" data-reset="markingInstructions" type="button">Reset to default</button></span>
           <textarea id="s-markingInstructions" rows="12" class="mono"></textarea></label>
-        <label><span class="row between"><span>Import instructions <span class="muted">(how uploaded materials are organized)</span></span><button class="link-btn" data-reset="organizePrompt" type="button">Reset to default</button></span>
-          <textarea id="s-organizePrompt" rows="8" class="mono"></textarea></label>
+        <label><span class="row between"><span>Numerical marking instructions <span class="muted">(added for numerical and mixed questions)</span></span><button class="link-btn" data-reset="numericalInstructions" type="button">Reset to default</button></span>
+          <textarea id="s-numericalInstructions" rows="10" class="mono"></textarea></label>
+        <label><span class="row between"><span>Question detection instructions <span class="muted">(how uploaded documents are read)</span></span><button class="link-btn" data-reset="documentPrompt" type="button">Reset to default</button></span>
+          <textarea id="s-documentPrompt" rows="14" class="mono"></textarea></label>
+        <label><span class="row between"><span>Script splitting instructions <span class="muted">(how a script is split by question)</span></span><button class="link-btn" data-reset="segmentPrompt" type="button">Reset to default</button></span>
+          <textarea id="s-segmentPrompt" rows="6" class="mono"></textarea></label>
         <p class="muted small">The question, steps, keywords, layout and transcript are added after these instructions automatically.</p>
       </div>
     </div>

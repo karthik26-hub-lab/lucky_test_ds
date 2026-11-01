@@ -185,3 +185,20 @@ ul.plain { margin: 4px 0; padding-left: 18px; }
 .save-bar { position: sticky; bottom: 0; display: flex; gap: 10px; align-items: center; padding: 14px 0; margin-top: 20px; background: var(--bg); border-top: 1px solid var(--line); }
 .call-notes { font-size: 12px; color: var(--warn); }
 a { color: var(--accent); }
+
+/* ---------- multi-question papers ---------- */
+.paper-bar { background: var(--accent-soft); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; }
+.paper-title { font-weight: 600; margin-bottom: 8px; }
+.paper-bar p { margin: 8px 0 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 2px 4px 2px 10px; }
+.chip.active { border-color: var(--accent); }
+.chip input { width: auto; margin: 0; }
+.chip button { background: none; border: 0; padding: 4px 8px; font-weight: 600; font-size: 13px; color: var(--text); }
+.chip.active button { color: var(--accent); }
+.paper-results { background: var(--accent-soft); border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; }
+.paper-results .chips { margin-top: 8px; }
+.chip-btn { background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-size: 13px; }
+.chip-btn.active { border-color: var(--accent); color: var(--accent); }
+.full-transcript { white-space: pre-wrap; font-size: 12.5px; max-height: 320px; overflow: auto; background: var(--bg); padding: 10px; border-radius: 8px; }
+summary { cursor: pointer; font-weight: 600; }
