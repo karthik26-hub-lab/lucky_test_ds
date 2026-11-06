@@ -149,6 +149,7 @@ function showTab(name) {
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach((p) => (p.hidden = p.id !== `tab-${name}`));
   if (name === 'history') loadHistory();
+  setDashboardActive(name === 'dashboard');
 }
 
 document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => showTab(t.dataset.tab)));
@@ -739,6 +740,7 @@ function renderRun(run) {
           </div>`
         : ''
     }
+    ${studentBanner(run)}
     <div class="card-head">
       <h2>${esc(run.scriptName)} <span class="muted">· ${esc(run.setup.code || 'Question')}</span></h2>
       <span class="muted small">${new Date(run.createdAt).toLocaleString()}</span>
@@ -884,7 +886,14 @@ async function regrade() {
   try {
     const run = await api('/api/grade', {
       method: 'POST',
-      json: { setup: state.run.setup, transcript, fullTranscript: state.run.fullTranscript, scriptName: state.run.scriptName, facultyTotal: state.run.facultyTotal ?? '' }
+      json: {
+        setup: state.run.setup,
+        transcript,
+        fullTranscript: state.run.fullTranscript,
+        scriptName: state.run.scriptName,
+        facultyTotal: state.run.facultyTotal ?? '',
+        replaceRunId: state.run.id
+      }
     });
     setStatus('');
     state.runGroup = state.runGroup.map((r) => (r.id === state.run.id ? run : r));

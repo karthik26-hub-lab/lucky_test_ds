@@ -8,6 +8,7 @@ You upload one Word file holding the questions and marking schemes, then the stu
 - marks each answer step by step, for both theory and numerical questions, including the own-figure rule
 - checks the AI's output with plain code
 - shows how close the AI's marks are to your faculty's marks
+- lets students upload their own answers from their phones, and shows them their marks once you publish
 
 Everything is editable: the models, the prompts, the marking rules, the review thresholds and the rate limits.
 
@@ -136,7 +137,34 @@ Other formats also work, and you can mix them:
 
 ---
 
-## 3. Working within the free tier
+## 3. Students upload from their phones
+Students upload their own answers, the app marks them automatically, and you publish the results when you're ready.
+
+**Setup (once)**
+1. Open the **Student exams** tab. Under **Key for student uploads**, save your Gemini key, or click **Use the key from Settings**. Every upload is marked with this key, using the models and prompts in Settings.
+2. The first time the app starts, Windows may ask whether Node.js can use the network. Allow it on **private networks**, or phones can't connect.
+
+**For each exam**
+1. Set up the questions in **Evaluate → Evaluation materials**, for example by uploading the Word file.
+2. In **Student exams**, give the exam a title, choose the questions, and click **Create exam**. It opens for uploads straight away.
+3. Students connect their phones to the **same Wi-Fi** as this computer, then scan the QR code or open the link shown. On the student page they:
+   1. pick the exam and read the questions
+   2. enter their name and roll number
+   3. photograph each page of their answer (or upload a PDF) and submit
+   4. get a **receipt code**, which they need to see their result
+4. Uploads appear under **Submissions** within seconds and are marked automatically. Click **Review** to see a student's marks next to their original pages, and change any marks. Tick **Reviewed** when you're done. Scripts with flags are the ones to check first.
+5. Click **Publish**. Students then open **My result**, enter their roll number and receipt code, and see their marks per question and per step, with what each lost step needed. Where you entered faculty marks, students see those instead of the AI's.
+
+**Good to know**
+- **Admin pages stay on this computer:** phones can only open the student page. Every other page and the results of other students are blocked.
+- **The computer must stay on:** keep this app running while students upload. Uploads wait in a queue if marking is slow, and anything not finished is marked when the app starts again.
+- **Close an exam** to stop new uploads. **Hide** results to take them back from students.
+- **Uploads after publishing:** once an exam is published, a later upload shows its marks to that student as soon as marking finishes. Close the exam first if you want to review every script.
+- **Free key limits:** on a free key, each script takes a few requests, so a class of 30 can take a while to mark. The **Received** and **Evaluated** counts show progress.
+
+---
+
+## 4. Working within the free tier
 The app helps in five ways:
 1. **Requests per minute:** requests are spaced to stay under your limit. The default is 8; set it to 0 on a paid key.
 2. **Automatic retries:** when Google says "rate limited", the app waits as long as Google asks, then tries again.
@@ -147,16 +175,18 @@ The app helps in five ways:
    - phone photos are shrunk to 2000px
 5. **Clear messages** when every model is out of quota.
 
-## 4. Settings you can change
+## 5. Settings you can change
 Everything is in the **Settings** tab and saved in `data/settings.json`:
 - the models and fallback models, and the temperature
 - the rate limits, retries and photo size
 - the confidence threshold for flagging a step
 - the OCR, marking, numerical marking, question detection and script splitting instructions (prompts). Each has a **Reset to default** button.
 
-## 5. Troubleshooting
+## 6. Troubleshooting
 | Problem | Fix |
 |---|---|
+| A phone can't open the student link | Check it's on the same Wi-Fi, and allow Node.js on private networks in Windows Defender Firewall. Some guest or college networks block devices from reaching each other |
+| Uploads show "Needs API key" | Save a key under **Key for student uploads** |
 | "Node.js is not installed" | Install the LTS version from nodejs.org, then start again |
 | "Gemini rejected the API key" | Copy the key again from aistudio.google.com/apikey |
 | "That model is not available" | Pick a model from the list in Settings |
@@ -170,6 +200,8 @@ Everything stays on your computer in the `data` folder:
 - `questions.json`: saved questions
 - `runs.json`: every evaluation
 - `ocr-cache.json`: saved transcripts
+- `exams.json`, `submissions.json` and the `submissions` folder: student exams, uploads and their pages
+- `server-key.json`: the key used for student uploads
 
 To start fresh, delete the `data` folder.
 
@@ -183,4 +215,5 @@ npm run dev
 - `gemini.js`: Gemini calls, rate limiting, retry and fallback
 - `lib.js`: prompts, schemas and result checks
 - `importer.js`: reading Word (tables, equations, pictures), Excel, CSV and text files, and the templates
-- `public/`: the UI
+- `students.js`: student uploads, the marking queue, exams and publishing, and keeping phones out of the admin pages
+- `public/`: the UI (`student.html` is the page students open)

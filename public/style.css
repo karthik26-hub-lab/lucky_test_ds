@@ -202,3 +202,19 @@ a { color: var(--accent); }
 .chip-btn.active { border-color: var(--accent); color: var(--accent); }
 .full-transcript { white-space: pre-wrap; font-size: 12.5px; max-height: 320px; overflow: auto; background: var(--bg); padding: 10px; border-radius: 8px; }
 summary { cursor: pointer; font-weight: 600; }
+
+/* ---------- student exams dashboard ---------- */
+.dash-top { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 20px; }
+.dash-top .card { margin-bottom: 20px; }
+@media (max-width: 900px) { .dash-top { grid-template-columns: 1fr; } }
+.connect { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.qr { width: 150px; flex-shrink: 0; }
+.qr svg { width: 100%; height: auto; display: block; }
+.url-list a { font-size: 16px; font-weight: 600; word-break: break-all; }
+.new-exam { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 14px; }
+.new-exam input, .new-exam select { margin: 0; flex: 1; min-width: 200px; }
+.exam-table tr.active { background: var(--accent-soft); }
+.exam-table td, .subs-table td { font-size: 13px; vertical-align: middle; }
+.subs-table label.check { margin: 6px 0 0; font-weight: normal; }
+.student-banner { background: var(--accent-soft); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; display: grid; gap: 4px; }
+.student-banner button { justify-self: start; margin-top: 4px; }

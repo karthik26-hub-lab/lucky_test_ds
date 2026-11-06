@@ -13,7 +13,8 @@
     <span class="muted">Theory and numerical answer accuracy check</span>
   </div>
   <nav class="tabs" role="tablist">
-    <button class="tab active" data-tab="evaluate" role="tab">Evaluate</button>
+    <button class="tab active" data-tab="dashboard" role="tab">Student exams</button>
+    <button class="tab" data-tab="evaluate" role="tab">Evaluate</button>
     <button class="tab" data-tab="history" role="tab">History &amp; accuracy</button>
     <button class="tab" data-tab="settings" role="tab">Settings</button>
   </nav>
@@ -21,8 +22,61 @@
 </header>
 
 <main>
+  <!-- ============ STUDENT EXAMS ============ -->
+  <section id="tab-dashboard" class="tab-panel">
+    <div class="dash-top">
+      <div class="card">
+        <h2>Students upload here</h2>
+        <div class="connect">
+          <div id="qr" class="qr"></div>
+          <div>
+            <p>Students on the <b>same Wi-Fi</b> open this on their phone, or scan the code:</p>
+            <div id="student-urls" class="url-list"></div>
+            <p class="muted small">If a phone can't open it, allow Node.js on <b>private networks</b> when Windows asks, or in Windows Defender Firewall. The admin pages only work on this computer.</p>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Key for student uploads</h2>
+        <p class="muted small">Each uploaded script is marked automatically with this Gemini key, using the models and prompts in Settings. The key is saved on this computer only.</p>
+        <div id="server-key-status" class="section"></div>
+        <label>Gemini API key<input id="server-key" type="password" autocomplete="off" placeholder="AIza…"></label>
+        <div class="row gap">
+          <button id="btn-server-key" class="primary" type="button">Save key</button>
+          <button id="btn-copy-key" class="ghost" type="button">Use the key from Settings</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Exams</h2>
+      <p class="muted small">Set up the questions in <b>Evaluate → Evaluation materials</b> (or save them there), then create an exam from them here. Students only see exams that are open for uploads.</p>
+      <div class="new-exam">
+        <input id="new-exam-title" placeholder="Exam title, e.g. PGBP Test 1">
+        <select id="new-exam-source"></select>
+        <button id="btn-create-exam" class="primary" type="button">Create exam</button>
+      </div>
+      <div class="table-wrap">
+        <table class="exam-table">
+          <thead><tr><th>Exam</th><th class="num">Questions</th><th class="num">Marks</th><th class="num">Received</th><th class="num">Evaluated</th><th>Uploads</th><th>Results</th><th></th></tr></thead>
+          <tbody id="exam-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" id="subs-card" hidden>
+      <div class="card-head"><h2 id="subs-title"></h2><span id="subs-note" class="muted small"></span></div>
+      <div class="table-wrap">
+        <table class="subs-table">
+          <thead><tr><th>Student</th><th>Roll no.</th><th>Received</th><th>Status</th><th class="num">AI marks</th><th class="num">Final marks</th><th>Review</th><th></th></tr></thead>
+          <tbody id="subs-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
   <!-- ============ EVALUATE ============ -->
-  <section id="tab-evaluate" class="tab-panel">
+  <section id="tab-evaluate" class="tab-panel" hidden>
     <ol class="stepper">
       <li data-step="1" class="current"><span>1</span> Evaluation materials</li>
       <li data-step="2"><span>2</span> Student scripts &amp; results</li>
@@ -269,5 +323,6 @@
 
 <div id="toast" class="toast" hidden></div>
 <script src="app.js"></script>
+<script src="dashboard.js"></script>
 </body>
 </html>

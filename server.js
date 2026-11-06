@@ -24,6 +24,7 @@ import {
 } from './lib.js';
 import { HttpError, createClient, friendlyError, generate, usageOf, filesToParts, parseJson } from './gemini.js';
 import { importMaterials, buildExcelTemplate, buildTextTemplate } from './importer.js';
+import { registerStudentFeatures, restrictToThisComputer, lanAddresses } from './students.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 try {
@@ -40,6 +41,7 @@ const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 const OCR_CACHE_FILE = path.join(DATA_DIR, 'ocr-cache.json');
 
 const app = express();
+app.use(restrictToThisComputer);
 app.use(express.json({ limit: '20mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024, files: 60 } });
@@ -59,8 +61,11 @@ function writeJson(file, value) {
 
 const loadSettings = () => sanitizeSettings(readJson(SETTINGS_FILE, {}));
 
+let students; // set up at the end of this file
+
+// The key typed in this browser wins; otherwise the key saved for student uploads is used
 function clientFor(req) {
-  return createClient((req.get('x-api-key') || process.env.GEMINI_API_KEY || '').trim());
+  return createClient((req.get('x-api-key') || students?.serverKey() || '').trim());
 }
 
 const route = (handler) => async (req, res) => {
@@ -101,8 +106,10 @@ async function runGrading(ai, setup, transcript, settings) {
   return { raw: parseJson(resp), usage: usageOf(resp, model), notes };
 }
 
-function saveRun({ setup, transcript, raw, settings, scriptName, facultyTotal, usage, notes, mode, transcriptSource, fullTranscript, resultOptions }) {
+// extra: fields linking the run to a student submission (submissionId, examId, studentName, rollNo)
+function saveRun({ setup, transcript, raw, settings, scriptName, facultyTotal, usage, notes, mode, transcriptSource, fullTranscript, resultOptions, extra }) {
   const run = {
+    ...extra,
     id: `run-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`,
     createdAt: new Date().toISOString(),
     scriptName: String(scriptName || '').trim() || 'Untitled script',
@@ -209,7 +216,7 @@ function transcriptCacheKey(files, settings) {
 
 // Marks one script against several questions: the transcript is split by question, then each
 // answer is marked on its own. One failed question does not lose the ones already marked.
-async function evaluatePaper(ai, setups, transcript, settings, { scriptName, ocrUsage, notes, transcriptSource }) {
+async function evaluatePaper(ai, setups, transcript, settings, { scriptName, ocrUsage, notes, transcriptSource, extra }) {
   const call = await generate(
     ai,
     modelChain(settings.gradingModel, settings.fallbackModels),
@@ -228,7 +235,7 @@ async function evaluatePaper(ai, setups, transcript, settings, { scriptName, ocr
   const errors = [];
   for (const [i, setup] of setups.entries()) {
     const answer = answers[i];
-    const common = { setup, transcript: answer.text, settings, scriptName, fullTranscript: transcript, mode: 'paper', transcriptSource };
+    const common = { setup, transcript: answer.text, settings, scriptName, fullTranscript: transcript, mode: 'paper', transcriptSource, extra };
     if (!answer.attempted) {
       // No answer means nothing to mark, so no request is spent on it
       runs.push(saveRun({ ...common, raw: {}, usage: usageBase, notes: [], resultOptions: { notAttempted: true, flags: paperFlags } }));
@@ -245,13 +252,99 @@ async function evaluatePaper(ai, setups, transcript, settings, { scriptName, ocr
   return { runs, errors };
 }
 
+// Reads one script (all its pages) and marks it against one or more questions. Used by the
+// Evaluate button and by the queue that marks student uploads. Returns { runs, errors }.
+async function evaluateFiles(ai, files, setups, settings, { scriptName, facultyTotal, extra }) {
+  setups.forEach(requireUsableSetup);
+  const isPaper = setups.length > 1;
+  const setup = setups[0];
+
+  const cache = readJson(OCR_CACHE_FILE, {});
+  const cacheKey = transcriptCacheKey(files, settings);
+  const cached = settings.reuseTranscripts ? cache[cacheKey] : null;
+  const ocrChain = modelChain(settings.ocrModel, settings.fallbackModels);
+  const notes = [];
+  let transcript;
+  let raw;
+  let ocrUsage = null;
+  let gradingUsage;
+  let mode = 'separate';
+
+  if (cached) {
+    transcript = cached.transcript;
+  } else if (settings.combineOcrAndMarking && !isPaper) {
+    mode = 'combined';
+    const parts = await filesToParts(ai, files);
+    const call = await generate(
+      ai,
+      ocrChain,
+      {
+        contents: [{ role: 'user', parts: [...parts, { text: buildCombinedPrompt(setup, settings) }] }],
+        config: { temperature: settings.temperature, responseMimeType: 'application/json', responseSchema: COMBINED_SCHEMA }
+      },
+      settings
+    );
+    notes.push(...call.notes);
+    raw = parseJson(call.resp);
+    transcript = String(raw.transcript || '').trim();
+    gradingUsage = usageOf(call.resp, call.model);
+  } else {
+    const parts = await filesToParts(ai, files);
+    const call = await generate(
+      ai,
+      ocrChain,
+      { contents: [{ role: 'user', parts: [...parts, { text: settings.ocrPrompt }] }], config: { temperature: settings.temperature } },
+      settings
+    );
+    notes.push(...call.notes);
+    transcript = (call.resp.text || '').trim();
+    ocrUsage = usageOf(call.resp, call.model);
+  }
+
+  if (!transcript) throw new HttpError(422, 'The model returned no transcript. Try a clearer scan or another model.');
+  if (!cached) {
+    cache[cacheKey] = { transcript, createdAt: new Date().toISOString() };
+    writeJson(OCR_CACHE_FILE, cache);
+  }
+  const transcriptSource = cached ? 'saved transcript (no OCR call)' : mode === 'combined' ? 'OCR + marking in one call' : 'OCR';
+
+  if (isPaper) {
+    return evaluatePaper(ai, setups, transcript, settings, { scriptName, ocrUsage, notes, transcriptSource, extra });
+  }
+
+  if (!raw) {
+    const graded = await runGrading(ai, setup, transcript, settings);
+    raw = graded.raw;
+    gradingUsage = graded.usage;
+    notes.push(...graded.notes);
+  }
+
+  return {
+    runs: [
+      saveRun({
+        setup,
+        transcript,
+        raw,
+        settings,
+        scriptName,
+        facultyTotal,
+        usage: { ocr: ocrUsage, grading: gradingUsage },
+        notes,
+        mode,
+        transcriptSource,
+        extra
+      })
+    ],
+    errors: []
+  };
+}
+
 app.post(
   '/api/evaluate',
   upload.array('files'),
   route(async (req, res) => {
     const files = req.files || [];
     if (!files.length) throw new HttpError(400, 'Attach the answer script (PDF or images).');
-    const settings = loadSettings();
     let setups;
     try {
       setups = JSON.parse(req.body.setups).map((q) => sanitizeSetup(q));
@@ -259,88 +352,9 @@ app.post(
       throw new HttpError(400, 'The question setup could not be read.');
     }
     if (!setups.length) throw new HttpError(400, 'Choose at least one question first (Step 1).');
-    setups.forEach(requireUsableSetup);
-    const isPaper = setups.length > 1;
-    const setup = setups[0];
-    const ai = clientFor(req);
-
-    const cache = readJson(OCR_CACHE_FILE, {});
-    const cacheKey = transcriptCacheKey(files, settings);
-    const cached = settings.reuseTranscripts ? cache[cacheKey] : null;
-    const ocrChain = modelChain(settings.ocrModel, settings.fallbackModels);
-    const notes = [];
-    let transcript;
-    let raw;
-    let ocrUsage = null;
-    let gradingUsage;
-    let mode = 'separate';
-
-    if (cached) {
-      transcript = cached.transcript;
-    } else if (settings.combineOcrAndMarking && !isPaper) {
-      mode = 'combined';
-      const parts = await filesToParts(ai, files);
-      const call = await generate(
-        ai,
-        ocrChain,
-        {
-          contents: [{ role: 'user', parts: [...parts, { text: buildCombinedPrompt(setup, settings) }] }],
-          config: { temperature: settings.temperature, responseMimeType: 'application/json', responseSchema: COMBINED_SCHEMA }
-        },
-        settings
-      );
-      notes.push(...call.notes);
-      raw = parseJson(call.resp);
-      transcript = String(raw.transcript || '').trim();
-      gradingUsage = usageOf(call.resp, call.model);
-    } else {
-      const parts = await filesToParts(ai, files);
-      const call = await generate(
-        ai,
-        ocrChain,
-        { contents: [{ role: 'user', parts: [...parts, { text: settings.ocrPrompt }] }], config: { temperature: settings.temperature } },
-        settings
-      );
-      notes.push(...call.notes);
-      transcript = (call.resp.text || '').trim();
-      ocrUsage = usageOf(call.resp, call.model);
-    }
-
-    if (!transcript) throw new HttpError(422, 'The model returned no transcript. Try a clearer scan or another model.');
-    if (!cached) {
-      cache[cacheKey] = { transcript, createdAt: new Date().toISOString() };
-      writeJson(OCR_CACHE_FILE, cache);
-    }
-    const transcriptSource = cached ? 'saved transcript (no OCR call)' : mode === 'combined' ? 'OCR + marking in one call' : 'OCR';
-
-    if (isPaper) {
-      return res.json(await evaluatePaper(ai, setups, transcript, settings, { scriptName: req.body.scriptName, ocrUsage, notes, transcriptSource }));
-    }
-
-    if (!raw) {
-      const graded = await runGrading(ai, setup, transcript, settings);
-      raw = graded.raw;
-      gradingUsage = graded.usage;
-      notes.push(...graded.notes);
-    }
-
-    res.json({
-      runs: [
-        saveRun({
-          setup,
-          transcript,
-          raw,
-          settings,
-          scriptName: req.body.scriptName,
-          facultyTotal: req.body.facultyTotal,
-          usage: { ocr: ocrUsage, grading: gradingUsage },
-          notes,
-          mode,
-          transcriptSource
-        })
-      ],
-      errors: []
-    });
+    res.json(
+      await evaluateFiles(clientFor(req), files, setups, loadSettings(), { scriptName: req.body.scriptName, facultyTotal: req.body.facultyTotal })
+    );
   })
 );
 
@@ -348,14 +362,18 @@ app.post(
 app.post(
   '/api/grade',
   route(async (req, res) => {
-    const { setup: rawSetup, transcript, fullTranscript, scriptName, facultyTotal } = req.body || {};
+    const { setup: rawSetup, transcript, fullTranscript, scriptName, facultyTotal, replaceRunId } = req.body || {};
     if (!String(transcript || '').trim()) throw new HttpError(400, 'There is no transcript to mark.');
     const settings = loadSettings();
     const setup = parseSetupField(rawSetup);
     requireUsableSetup(setup);
     const { raw, usage, notes } = await runGrading(clientFor(req), setup, transcript, settings);
-    res.json(
-      saveRun({
+    const previous = replaceRunId ? readJson(RUNS_FILE).find((r) => r.id === replaceRunId) : null;
+    const extra = previous?.submissionId
+      ? { submissionId: previous.submissionId, examId: previous.examId, studentName: previous.studentName, rollNo: previous.rollNo }
+      : undefined;
+    const run = saveRun({
+        extra,
         setup,
         transcript,
         fullTranscript,
@@ -367,8 +385,9 @@ app.post(
         notes,
         mode: 'remark',
         transcriptSource: 'edited transcript'
-      })
-    );
+      });
+    if (previous) students.replaceRun(previous.id, run);
+    res.json(run);
   })
 );
 
@@ -479,9 +498,23 @@ app.get('/api/runs.csv', (req, res) => {
   res.send('﻿' + csv);
 });
 
-const server = app.listen(PORT, '127.0.0.1', () => {
+students = registerStudentFeatures(app, {
+  dataDir: DATA_DIR,
+  port: PORT,
+  readJson,
+  writeJson,
+  upload,
+  route,
+  evaluateFiles,
+  loadSettings,
+  runsFile: RUNS_FILE
+});
+
+// Listens on the network so students' phones on the same Wi-Fi can reach the student page
+const server = app.listen(PORT, () => {
   const url = `http://localhost:${PORT}`;
   console.log(`CA Evaluation Tester running at ${url}`);
+  lanAddresses().forEach((ip) => console.log(`Students on the same Wi-Fi: http://${ip}:${PORT}/student.html`));
   console.log(`Data is saved in ${DATA_DIR}`);
   if (process.argv.includes('--open')) {
     const [cmd, args] =

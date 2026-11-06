@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Submit your answer</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { background: var(--bg); }
+  .s-wrap { max-width: 720px; margin: 0 auto; padding: 16px; }
+  .s-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .s-head h1 { font-size: 20px; margin: 0; }
+  .exam-card { display: block; width: 100%; text-align: left; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 10px; font: inherit; cursor: pointer; }
+  .exam-card:hover { border-color: var(--accent); }
+  .exam-card b { display: block; font-size: 16px; margin-bottom: 4px; }
+  .question { border-top: 1px solid var(--line); padding: 12px 0; }
+  .question:first-of-type { border-top: 0; }
+  .question-text { white-space: pre-wrap; line-height: 1.5; }
+  .question table { margin: 8px 0; font-size: 13px; }
+  .question td, .question th { border: 1px solid var(--line); }
+  .pick { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+  .pick label { position: relative; margin: 0; text-align: center; padding: 14px 8px; border-radius: 10px; border: 2px dashed var(--line); cursor: pointer; font-weight: 600; }
+  .pick label:hover { border-color: var(--accent); background: var(--accent-soft); }
+  .pick input { position: absolute; inset: 0; opacity: 0; cursor: pointer; margin: 0; }
+  .pages { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin-bottom: 12px; }
+  .page { position: relative; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--card); aspect-ratio: 3 / 4; display: grid; place-items: center; font-size: 12px; text-align: center; padding: 4px; }
+  .page img { width: 100%; height: 100%; object-fit: cover; }
+  .page .n { position: absolute; top: 4px; left: 4px; background: var(--text); color: #fff; border-radius: 999px; padding: 0 7px; font-size: 11px; }
+  .page .x { position: absolute; top: 2px; right: 2px; background: var(--card); border: 0; border-radius: 999px; width: 26px; height: 26px; font-size: 16px; cursor: pointer; }
+  .receipt { text-align: center; padding: 24px 12px; }
+  .receipt .code { font-size: 38px; font-weight: 800; letter-spacing: 6px; margin: 10px 0; font-family: ui-monospace, Consolas, monospace; }
+  .score-big { font-size: 34px; font-weight: 800; }
+  .step-row { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 8px 0; }
+  .step-row.full { border-left: 4px solid var(--good); }
+  .step-row.part { border-left: 4px solid var(--warn); }
+  .step-row.zero { border-left: 4px solid var(--bad); }
+  .step-row .top { display: flex; justify-content: space-between; gap: 10px; font-weight: 600; }
+  .step-row .needed { margin-top: 6px; font-size: 13px; white-space: pre-wrap; color: var(--muted); }
+  .my-subs button { margin: 0 6px 6px 0; }
+</style>
+</head>
+<body>
+<div class="s-wrap">
+  <div class="s-head">
+    <h1 id="page-title">Submit your answer</h1>
+    <nav class="tabs">
+      <button class="tab active" data-view="submit" type="button">Submit</button>
+      <button class="tab" data-view="results" type="button">My result</button>
+    </nav>
+  </div>
+
+  <!-- choose exam -->
+  <section id="v-exams">
+    <div class="card"><h2>Choose your paper</h2><div id="exam-list"><p class="muted">Loading…</p></div></div>
+  </section>
+
+  <!-- answer one exam -->
+  <section id="v-answer" hidden>
+    <div class="card">
+      <div class="card-head"><h2 id="exam-title"></h2><button id="btn-change" class="ghost small-btn" type="button">← Other papers</button></div>
+      <div id="exam-questions"></div>
+    </div>
+    <div class="card">
+      <h2>Upload your answer</h2>
+      <div class="grid-2">
+        <label>Your name<input id="student-name" autocomplete="name"></label>
+        <label>Roll number<input id="roll-no" autocomplete="off"></label>
+      </div>
+      <p class="muted small">Write your answers on paper, then photograph every page in order, or upload one PDF.</p>
+      <div class="pick">
+        <label>📷 Take photo<input id="camera" type="file" accept="image/*" capture="environment"></label>
+        <label>🖼 Choose files<input id="files" type="file" accept="image/*,application/pdf" multiple></label>
+      </div>
+      <div id="pages" class="pages"></div>
+      <button id="btn-submit" class="primary wide" type="button">Submit answer</button>
+      <p id="submit-status" class="muted small"></p>
+    </div>
+  </section>
+
+  <!-- receipt -->
+  <section id="v-receipt" hidden>
+    <div class="card receipt">
+      <h2>Answer submitted ✓</h2>
+      <p>Your receipt code:</p>
+      <div class="code" id="receipt-code"></div>
+      <p class="muted">Write this code down or take a screenshot. You need it with your roll number to see your result after the academy publishes it.</p>
+      <button id="btn-see-result" class="secondary" type="button">Check status</button>
+    </div>
+  </section>
+
+  <!-- results -->
+  <section id="v-results" hidden>
+    <div class="card">
+      <h2>See my result</h2>
+      <div class="grid-2">
+        <label>Roll number<input id="r-roll"></label>
+        <label>Receipt code<input id="r-code" autocapitalize="characters" autocomplete="off"></label>
+      </div>
+      <button id="btn-lookup" class="primary" type="button">Show result</button>
+      <div id="my-subs" class="my-subs section"></div>
+    </div>
+    <div id="result-out"></div>
+  </section>
+</div>
+<div id="toast" class="toast" hidden></div>
+<script src="student.js"></script>
+</body>
+</html>

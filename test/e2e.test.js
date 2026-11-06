@@ -228,6 +228,98 @@ try {
   const csv = await (await fetch(`${APP}/api/runs.csv`)).text();
   assert.match(csv, /Roll 101,Q1/);
 
+  // ---------- students upload from their phones; the admin reviews and publishes ----------
+  const json = async (route, method = 'GET', body) => {
+    const res = await fetch(APP + route, { method, headers: { 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
+    return { status: res.status, data: await res.json() };
+  };
+  const waitFor = async (check) => {
+    for (let i = 0; i < 100; i++) {
+      const value = await check();
+      if (value) return value;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error('timed out waiting for the queue');
+  };
+
+  const exam = (await json('/api/exams', 'POST', { title: 'Accounts Test 1', questions: setups })).data;
+  const listed = (await json('/api/student/exams')).data;
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0].questions.length, 3);
+  assert.equal(listed[0].questions[0].steps, undefined, 'students never see the marking scheme');
+  assert.equal(listed[0].questions[0].scheme, undefined);
+
+  const studentUpload = async (rollNo, bytes) => {
+    const form = new FormData();
+    form.append('examId', exam.id);
+    form.append('studentName', 'Asha');
+    form.append('rollNo', rollNo);
+    form.append('files', new File([Buffer.from(bytes)], 'page1.jpg', { type: 'image/jpeg' }));
+    const res = await fetch(`${APP}/api/student/submissions`, { method: 'POST', body: form });
+    return { status: res.status, data: await res.json() };
+  };
+
+  // With no key saved, uploads wait instead of failing
+  const early = await studentUpload('R-7', 'page bytes for roll 7');
+  assert.equal(early.status, 200, JSON.stringify(early.data));
+  assert.match(early.data.code, /^[A-Z2-9]{6}$/);
+  const subsUrl = `/api/exams/${exam.id}/submissions`;
+  await waitFor(async () => (await json(subsUrl)).data[0].status === 'waiting-for-key');
+
+  seen.length = 0;
+  await json('/api/students/server-key', 'PUT', { apiKey: 'server-key' });
+  const marked = await waitFor(async () => {
+    const s = (await json(subsUrl)).data[0];
+    return s.status === 'evaluated' && s;
+  });
+  assert.deepEqual(seen.map((s) => s.kind), ['ocr', 'split', 'mark-numerical', 'mark-theory'], 'saving the key starts marking');
+  assert.equal(marked.aiTotal, 5);
+  assert.equal(marked.maxMarks, 8);
+  assert.equal(marked.runIds.length, 3);
+
+  const resultsUrl = (code, roll = 'r-7') => `/api/student/results?rollNo=${roll}&code=${code}`;
+  const hidden = await json(resultsUrl(early.data.code.toLowerCase()));
+  assert.equal(hidden.data.published, false, 'marks stay hidden until the admin publishes');
+  assert.equal(hidden.data.total, undefined);
+  assert.equal((await json(resultsUrl('ZZZZZZ'))).status, 404, 'a wrong receipt code shows nothing');
+  assert.equal((await json(resultsUrl(early.data.code, 'R-8'))).status, 404, "another student's roll number shows nothing");
+
+  // Faculty adjust a step, then re-mark one answer: the student sees the adjusted, current marks
+  const runsUrl = `/api/submissions/${marked.id}/runs`;
+  const [sq1, sq2] = (await json(runsUrl)).data;
+  await json(`/api/runs/${sq1.id}`, 'PATCH', { facultySteps: [2, 2] });
+  const remark = await json('/api/grade', 'POST', { setup: sq2.setup, transcript: sq2.transcript, scriptName: sq2.scriptName, replaceRunId: sq2.id });
+  assert.equal(remark.status, 200, JSON.stringify(remark.data));
+  assert.equal(remark.data.submissionId, marked.id, 'the re-marked answer still belongs to the student');
+  assert.equal((await json(runsUrl)).data[1].id, remark.data.id);
+
+  await json(`/api/exams/${exam.id}`, 'PATCH', { published: true });
+  const published = (await json(resultsUrl(early.data.code))).data;
+  assert.equal(published.published, true);
+  assert.equal(published.total, 6, 'faculty marks replace the AI marks: 4 + 2 + 0');
+  assert.equal(published.maxMarks, 8);
+  assert.equal(published.questions[0].steps[0].marks, 2);
+  assert.match(published.questions[0].steps[0].needed, /4,50,000/, 'students see what each step needed');
+  assert.equal(published.questions[2].notAttempted, true);
+
+  // Closed exams take no uploads
+  await json(`/api/exams/${exam.id}`, 'PATCH', { open: false });
+  assert.equal((await json('/api/student/exams')).data.length, 0);
+  assert.equal((await studentUpload('R-9', 'late')).status, 400);
+
+  // Phones on the Wi-Fi reach only the student page, never the admin pages or results
+  const lanIp = Object.values(os.networkInterfaces()).flat().find((i) => i && i.family === 'IPv4' && !i.internal)?.address;
+  if (lanIp) {
+    const remote = `http://${lanIp}:${APP_PORT}`;
+    assert.equal((await fetch(`${remote}/api/exams`)).status, 403);
+    assert.equal((await fetch(`${remote}/api/runs`)).status, 403);
+    assert.equal((await fetch(`${remote}/api/student/exams`)).status, 200);
+    const home = await fetch(`${remote}/`, { redirect: 'manual' });
+    assert.equal(home.headers.get('location'), '/student.html');
+  } else {
+    console.log('No network connection: skipped the phone access checks.');
+  }
+
   console.log('All end-to-end tests passed.');
   if (KEEP) {
     console.log(`Stand-in running. Open http://localhost:${APP_PORT} (any API key works). Press Ctrl+C to stop.`);
